@@ -1,0 +1,138 @@
+Program.Sub.ScreenSU.Start
+Program.Sub.ScreenSU.End
+
+Program.Sub.Preflight.Start
+
+Program.Sub.Preflight.End
+
+Program.Sub.Main.Start
+'Launched from one of the CRM Script buttons on the toolbar
+'Hooks 30623-30627
+
+V.Local.iCt.Declare(Long)
+V.Local.smsg.Declare(String)
+V.Local.iTotal.Declare(Long)
+V.local.sContact.Declare(String)
+V.Local.bRet.Declare(Boolean)
+V.Local.sCompName.Declare(String)
+V.Local.sMSContacts.Declare(String)
+V.Local.iUB.Declare(Long)
+V.Local.i.Declare(Long)
+V.Local.bFound.Declare(Boolean,False)
+V.Local.iUCt.Declare(Long)
+V.Local.sCVal.Declare(String)
+
+'Check presence of MS Outlook
+F.Automation.MSOutlook.CheckPresence(V.Local.bFound)
+F.Intrinsic.Control.If(V.Local.bFound,=,False)
+	F.Intrinsic.UI.Msgbox("MS Outlook 2003 or higher must be installed.")
+	F.Intrinsic.Control.End
+F.Intrinsic.Control.EndIf
+
+'Opens connection to current user's database
+F.ODBC.Connection!con.OpenConnection(V.Ambient.PDSN,V.Ambient.PUser,V.Ambient.PPass)
+
+'Tests to see if contact table exists within database, displays error if it does not exist
+F.ODBC.Connection!con.TableExists("CONTACT",Variable.Local.bRet)
+F.Intrinsic.Control.If(V.Local.bRet,=,False)
+	F.Intrinsic.UI.Msgbox("Contact table does not exist within the database.")
+	F.Intrinsic.Control.End
+F.Intrinsic.Control.EndIf
+
+'Reads relevant fields from the recordset
+F.ODBC.Connection!con.OpenRecordsetRO("rst","SELECT NAME_FIRST, NAME_LAST, EMAIL1, NAME, TITLE, USER_1,  CUST, Alt_ID, ADDRESS_1, CITY, STATE, ZIP, PHONE1, PHONE2, Type from CONTACT")
+
+'Counts records in rst
+F.ODBC.Connection!con.OpenRecordsetRO("rstCount","SELECT COUNT (*) AS ContactCount FROM CONTACT")
+	V.Local.iTotal.Set(V.ODBC.con!rstCount.FieldVal!contactcount)
+F.ODBC.con!rstCount.Close
+
+'Get existing contacts from MS Outlook
+F.Automation.MSOutlook.GetContactsExt(V.Local.sMSContacts)
+F.Intrinsic.String.Split(V.Local.sMSContacts,"!*!",V.Local.sContact)
+V.Local.iUB.Set(V.Local.sContact.UBound)
+F.Intrinsic.Control.If(V.Local.sContact(0),=,"")
+	V.Local.iUB.Set(-1)
+F.Intrinsic.Control.EndIf
+
+'Exports all contacts from GS
+F.Intrinsic.UI.InvokeWaitDialog("Exporting contacts...","Progress")
+F.Intrinsic.Control.DoUntil(V.ODBC.con!rst.EOF,=,True)
+	'Get company name
+	'F.Intrinsic.Debug.Stop
+	F.Intrinsic.Control.CallSub("GetCompName","sCompNo",V.ODBC.con!rst.FieldVal!Cust,"sType",V.ODBC.con!rst.FieldVal!Type)
+
+	V.Local.bFound.Set(False)
+	F.Intrinsic.Control.For(V.Local.i,0,V.Local.iUB,1)
+		F.Intrinsic.String.Split(V.Local.sContact(v.Local.i),"*!*",V.Local.sCVal)
+		F.Intrinsic.Control.If(V.Local.sCVal(11).Long,=,V.ODBC.con!rst.FieldValLong!Alt_ID)
+			V.Local.bFound.Set(True)
+			F.Intrinsic.Control.ExitFor(V.Local.i)
+		F.Intrinsic.Control.Endif
+	F.Intrinsic.Control.Next(V.Local.i)
+
+	'Export contact to Outlook
+'	F.Intrinsic.Control.If(V.Local.bFound,=,False)
+	F.Intrinsic.Control.If(V.Local.bFound,=,True)
+		F.Automation.MSOutlook.AddContact(V.ODBC.con!rst.FieldValRTrim!name_first,V.ODBC.con!rst.FieldValRTrim!name_last,V.ODBC.con!rst.FieldValRTrim!email1,V.ODBC.con!rst.FieldValRTrim!name,V.ODBC.con!rst.FieldValRTrim!title,V.ODBC.con!rst.FieldValRTrim!user_1,"",V.args.sCompName,V.ODBC.con!rst.FieldValRTrim!alt_id,"",V.ODBC.con!rst.FieldValRTrim!address_1,V.ODBC.con!rst.FieldValRTrim!city,V.ODBC.con!rst.FieldValRTrim!zip,V.ODBC.con!rst.FieldValRTrim!state,V.ODBC.con!rst.FieldValRTrim!phone1,V.ODBC.con!rst.FieldValRTrim!phone2)
+		F.Intrinsic.Math.Add(V.Local.iUCt,1,V.Local.iUCt)
+ 	F.Intrinsic.Control.EndIf
+
+	'Update progress bar
+	F.Intrinsic.Math.Add(V.Local.iCt,1,V.Local.iCt)
+	F.Intrinsic.Control.If(V.Local.iCt,<>,1)
+		F.Intrinsic.UI.ChangeWaitStatus(V.ODBC.con!rst.FieldValRTrim!name,V.Local.iCt,1,V.Local.iTotal)
+	F.Intrinsic.Control.EndIf
+
+	F.ODBC.con!rst.MoveNext
+F.Intrinsic.Control.Loop
+
+F.Intrinsic.UI.CloseWaitDialog
+F.Intrinsic.String.Concat(V.Local.iUCt," contacts exported successfully.",V.Local.sMsg)
+F.Intrinsic.UI.Msgbox(V.Local.smsg)
+
+'Closes connection to recordset
+F.ODBC.con!rst.Close
+
+
+Program.Sub.Main.End
+
+Program.Sub.GetCompName.Start
+V.Local.sSQL.Declare(String)
+
+F.Intrinsic.Control.SelectCase(V.Args.sType)
+	F.Intrinsic.Control.Case("C")
+		F.Intrinsic.String.Concat("Select Name_Customer from V_Customer_Master where Customer='",V.Args.sCompNo,"'",V.Local.sSQL)
+'		F.Intrinsic.String.Concat("Select Name_Customer from V_Customer_Master where Customer='","AALSTE","'",V.Local.sSQL)
+		F.ODBC.Connection!con.OpenRecordsetRO("rstC",V.Local.sSQL)
+		F.Intrinsic.Control.If(V.ODBC.con!rstC.EOF,=,False)
+			F.Intrinsic.Variable.AddRV("sCompName",V.ODBC.con!rstC.FieldValTrim!Name_Customer)
+		F.Intrinsic.Control.EndIf
+	F.Intrinsic.Control.Case("P")
+		F.Intrinsic.String.Concat("Select Name_Prospect from V_Prospect_Master where Prospect='",V.Args.sCompNo,"' and Prosp_Type=0",V.Local.sSQL)
+'		F.Intrinsic.String.Concat("Select Name_Prospect from V_Prospect_Master where Prospect='","MEXP","' and Prosp_Type=0",V.Local.sSQL)
+		F.ODBC.Connection!con.OpenRecordsetRO("rstC",V.Local.sSQL)
+		F.Intrinsic.Control.If(V.ODBC.con!rstC.EOF,=,False)
+			F.Intrinsic.Variable.AddRV("sCompName",V.ODBC.con!rstC.FieldValTrim!Name_Prospect)
+		F.Intrinsic.Control.EndIf
+	F.Intrinsic.Control.Case("S")
+		F.Intrinsic.String.Concat("Select Name_Prospect from V_Prospect_Master where Prospect='",V.Args.sCompNo,"' and Prosp_Type=1",V.Local.sSQL)
+		F.ODBC.Connection!con.OpenRecordsetRO("rstC",V.Local.sSQL)
+		F.Intrinsic.Control.If(V.ODBC.con!rstC.EOF,=,False)
+			F.Intrinsic.Variable.AddRV("sCompName",V.ODBC.con!rstC.FieldValTrim!Name_Prospect)
+		F.Intrinsic.Control.EndIf
+	F.Intrinsic.Control.Case("V")
+		F.Intrinsic.String.Concat("Select Name_Vendor from V_Vendor_Master where Vendor='",V.Args.sCompNo,"'",V.Local.sSQL)
+		F.ODBC.Connection!con.OpenRecordsetRO("rstC",V.Local.sSQL)
+		F.Intrinsic.Control.If(V.ODBC.con!rstC.EOF,=,False)
+			F.Intrinsic.Variable.AddRV("sCompName",V.ODBC.con!rstC.FieldValTrim!Name_Vendor)
+		F.Intrinsic.Control.EndIf
+F.Intrinsic.Control.EndSelect
+
+F.Intrinsic.Control.If(V.ODBC.con!rstC.State,=,1)
+	F.ODBC.con!rstC.Close
+F.Intrinsic.Control.EndIf
+
+Program.Sub.GetCompName.End
+
+
